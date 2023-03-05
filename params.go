@@ -7,8 +7,9 @@ import (
 	"sync"
 	"time"
 
+	stakeibctypes "github.com/Stride-Labs/stride/v6/x/stakeibc/types"
+
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/google/uuid"
@@ -48,13 +49,13 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		},
 	)
 
-	paramsGoalBondedGauge := prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Name:        "cosmos_params_goal_bonded",
-			Help:        "Goal bonded",
-			ConstLabels: ConstLabels,
-		},
-	)
+	// paramsGoalBondedGauge := prometheus.NewGauge(
+	// 	prometheus.GaugeOpts{
+	// 		Name:        "cosmos_params_goal_bonded",
+	// 		Help:        "Goal bonded",
+	// 		ConstLabels: ConstLabels,
+	// 	},
+	// )
 
 	paramsInflationMinGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -142,6 +143,22 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			ConstLabels: ConstLabels,
 		},
 	)
+	paramsRedemptionRateGauge := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name:        "stride_params_redemption_rate",
+			Help:        "Redemption rate",
+			ConstLabels: ConstLabels,
+		},
+		[]string{"chain"},
+	)
+	paramsStakedAmountGauge := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name:        "stride_staked_amount",
+			Help:        "Staked amount for each asset in Stride chain",
+			ConstLabels: ConstLabels,
+		},
+		[]string{"chain"},
+	)
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(paramsMaxValidatorsGauge)
@@ -158,6 +175,8 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	registry.MustRegister(paramsBaseProposerRewardGauge)
 	registry.MustRegister(paramsBonusProposerRewardGauge)
 	registry.MustRegister(paramsCommunityTaxGauge)
+	registry.MustRegister(paramsRedemptionRateGauge)
+	registry.MustRegister(paramsStakedAmountGauge)
 
 	var wg sync.WaitGroup
 
@@ -187,63 +206,63 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	}()
 	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-		sublogger.Debug().Msg("Started querying global mint params")
-		queryStart := time.Now()
+	// go func() {
+	// 	defer wg.Done()
+	// 	sublogger.Debug().Msg("Started querying global mint params")
+	// 	queryStart := time.Now()
 
-		mintClient := minttypes.NewQueryClient(grpcConn)
-		paramsResponse, err := mintClient.Params(
-			context.Background(),
-			&minttypes.QueryParamsRequest{},
-		)
-		if err != nil {
-			sublogger.Error().
-				Err(err).
-				Msg("Could not get global mint params")
-			return
-		}
+	// 	mintClient := minttypes.NewQueryClient(grpcConn)
+	// 	paramsResponse, err := mintClient.Params(
+	// 		context.Background(),
+	// 		&minttypes.QueryParamsRequest{},
+	// 	)
+	// 	if err != nil {
+	// 		sublogger.Error().
+	// 			Err(err).
+	// 			Msg("Could not get global mint params")
+	// 		return
+	// 	}
 
-		sublogger.Debug().
-			Float64("request-time", time.Since(queryStart).Seconds()).
-			Msg("Finished querying global mint params")
+	// 	sublogger.Debug().
+	// 		Float64("request-time", time.Since(queryStart).Seconds()).
+	// 		Msg("Finished querying global mint params")
 
-		paramsBlocksPerYearGauge.Set(float64(paramsResponse.Params.BlocksPerYear))
+	// 	paramsBlocksPerYearGauge.Set(float64(paramsResponse.Params.BlocksPerYear))
 
-		// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-		if value, err := strconv.ParseFloat(paramsResponse.Params.GoalBonded.String(), 64); err != nil {
-			sublogger.Error().
-				Err(err).
-				Msg("Could not parse goal bonded")
-		} else {
-			paramsGoalBondedGauge.Set(value)
-		}
+	// 	// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
+	// 	if value, err := strconv.ParseFloat(paramsResponse.Params.GoalBonded.String(), 64); err != nil {
+	// 		sublogger.Error().
+	// 			Err(err).
+	// 			Msg("Could not parse goal bonded")
+	// 	} else {
+	// 		paramsGoalBondedGauge.Set(value)
+	// 	}
 
-		if value, err := strconv.ParseFloat(paramsResponse.Params.InflationMin.String(), 64); err != nil {
-			sublogger.Error().
-				Err(err).
-				Msg("Could not parse inflation min")
-		} else {
-			paramsInflationMinGauge.Set(value)
-		}
+	// 	if value, err := strconv.ParseFloat(paramsResponse.Params.InflationMin.String(), 64); err != nil {
+	// 		sublogger.Error().
+	// 			Err(err).
+	// 			Msg("Could not parse inflation min")
+	// 	} else {
+	// 		paramsInflationMinGauge.Set(value)
+	// 	}
 
-		if value, err := strconv.ParseFloat(paramsResponse.Params.InflationMax.String(), 64); err != nil {
-			sublogger.Error().
-				Err(err).
-				Msg("Could not parse inflation min")
-		} else {
-			paramsInflationMaxGauge.Set(value)
-		}
+	// 	if value, err := strconv.ParseFloat(paramsResponse.Params.InflationMax.String(), 64); err != nil {
+	// 		sublogger.Error().
+	// 			Err(err).
+	// 			Msg("Could not parse inflation min")
+	// 	} else {
+	// 		paramsInflationMaxGauge.Set(value)
+	// 	}
 
-		if value, err := strconv.ParseFloat(paramsResponse.Params.InflationRateChange.String(), 64); err != nil {
-			sublogger.Error().
-				Err(err).
-				Msg("Could not parse inflation rate change")
-		} else {
-			paramsInflationRateChangeGauge.Set(value)
-		}
-	}()
-	wg.Add(1)
+	// 	if value, err := strconv.ParseFloat(paramsResponse.Params.InflationRateChange.String(), 64); err != nil {
+	// 		sublogger.Error().
+	// 			Err(err).
+	// 			Msg("Could not parse inflation rate change")
+	// 	} else {
+	// 		paramsInflationRateChangeGauge.Set(value)
+	// 	}
+	// }()
+	// wg.Add(1)
 
 	go func() {
 		defer wg.Done()
@@ -341,6 +360,51 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			paramsCommunityTaxGauge.Set(value)
 		}
 	}()
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		sublogger.Debug().Msg("Started querying global stakeibc params")
+
+		stakeibcClient := stakeibctypes.NewQueryClient(grpcConn)
+
+		hostZoneAllResponse, err := stakeibcClient.HostZoneAll(
+			context.Background(),
+			&stakeibctypes.QueryAllHostZoneRequest{},
+		)
+
+		if err != nil {
+			sublogger.Error().
+				Err(err).
+				Msg("Could not get global stakeibc params")
+			return
+		}
+
+		for _, hostZone := range hostZoneAllResponse.HostZone {
+			if value, err := strconv.ParseFloat(hostZone.RedemptionRate.String(), 64); err != nil {
+				sublogger.Error().
+					Err(err).
+					Msg("Could not parse redemption rate")
+			} else {
+				paramsRedemptionRateGauge.With(prometheus.Labels{
+					"chain": hostZone.ChainId,
+				}).Set(value)
+			}
+
+			// Get the staked amount for each asset
+			if value, err := strconv.ParseFloat(hostZone.StakedBal.String(), 64); err != nil {
+				sublogger.Error().
+					Err(err).
+					Msg("Could not parse staked amount")
+			} else {
+				paramsStakedAmountGauge.With(prometheus.Labels{
+					"chain": hostZone.ChainId,
+				}).Set(value)
+			}
+		}
+
+	}()
+
 	wg.Add(1)
 
 	wg.Wait()
