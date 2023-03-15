@@ -2,16 +2,23 @@ package main
 
 import (
 	"context"
+	"math/big"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
+	minttypes "github.com/Stride-Labs/stride/v6/x/mint/types"
 	stakeibctypes "github.com/Stride-Labs/stride/v6/x/stakeibc/types"
 
+	"math"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -49,13 +56,21 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		},
 	)
 
-	// paramsGoalBondedGauge := prometheus.NewGauge(
-	// 	prometheus.GaugeOpts{
-	// 		Name:        "cosmos_params_goal_bonded",
-	// 		Help:        "Goal bonded",
-	// 		ConstLabels: ConstLabels,
-	// 	},
-	// )
+	paramsAPYGauge := prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name:        "stride_apy",
+			Help:        "APY",
+			ConstLabels: ConstLabels,
+		},
+	)
+
+	paramsInflationGauge := prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name:        "stride_inflation",
+			Help:        "inflation rate",
+			ConstLabels: ConstLabels,
+		},
+	)
 
 	paramsInflationMinGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -177,6 +192,8 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	registry.MustRegister(paramsCommunityTaxGauge)
 	registry.MustRegister(paramsRedemptionRateGauge)
 	registry.MustRegister(paramsStakedAmountGauge)
+	registry.MustRegister(paramsAPYGauge)
+	registry.MustRegister(paramsInflationGauge)
 
 	var wg sync.WaitGroup
 
@@ -206,63 +223,77 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	}()
 	wg.Add(1)
 
-	// go func() {
-	// 	defer wg.Done()
-	// 	sublogger.Debug().Msg("Started querying global mint params")
-	// 	queryStart := time.Now()
+	go func() {
+		defer wg.Done()
+		sublogger.Debug().Msg("Started querying global mint params")
+		// queryStart := time.Now()
 
-	// 	mintClient := minttypes.NewQueryClient(grpcConn)
-	// 	paramsResponse, err := mintClient.Params(
-	// 		context.Background(),
-	// 		&minttypes.QueryParamsRequest{},
-	// 	)
-	// 	if err != nil {
-	// 		sublogger.Error().
-	// 			Err(err).
-	// 			Msg("Could not get global mint params")
-	// 		return
-	// 	}
+		mintClient := minttypes.NewQueryClient(grpcConn)
+		paramsResponse, err := mintClient.Params(
+			context.Background(),
+			&minttypes.QueryParamsRequest{},
+		)
+		if err != nil {
+			sublogger.Error().
+				Err(err).
+				Msg("Could not get global mint params")
+			return
+		}
 
-	// 	sublogger.Debug().
-	// 		Float64("request-time", time.Since(queryStart).Seconds()).
-	// 		Msg("Finished querying global mint params")
+		epoch_provision := paramsResponse.Params.GenesisEpochProvisions
+		staking := paramsResponse.Params.DistributionProportions.Staking
+		reduction_period_in_epochs := paramsResponse.Params.ReductionPeriodInEpochs
 
-	// 	paramsBlocksPerYearGauge.Set(float64(paramsResponse.Params.BlocksPerYear))
+		stakingClient := stakingtypes.NewQueryClient(grpcConn)
+		response, err := stakingClient.Pool(
+			context.Background(),
+			&stakingtypes.QueryPoolRequest{},
+		)
+		if err != nil {
+			sublogger.Error().Err(err).Msg("Could not get staking pool")
+			return
+		}
 
-	// 	// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-	// 	if value, err := strconv.ParseFloat(paramsResponse.Params.GoalBonded.String(), 64); err != nil {
-	// 		sublogger.Error().
-	// 			Err(err).
-	// 			Msg("Could not parse goal bonded")
-	// 	} else {
-	// 		paramsGoalBondedGauge.Set(value)
-	// 	}
+		bond_tokens := response.Pool.BondedTokens.Int64()
 
-	// 	if value, err := strconv.ParseFloat(paramsResponse.Params.InflationMin.String(), 64); err != nil {
-	// 		sublogger.Error().
-	// 			Err(err).
-	// 			Msg("Could not parse inflation min")
-	// 	} else {
-	// 		paramsInflationMinGauge.Set(value)
-	// 	}
+		apy := epoch_provision.Mul(staking).Mul(sdk.NewDecFromBigInt(big.NewInt(reduction_period_in_epochs))).Quo(sdk.NewDecFromBigInt(big.NewInt(bond_tokens)))
 
-	// 	if value, err := strconv.ParseFloat(paramsResponse.Params.InflationMax.String(), 64); err != nil {
-	// 		sublogger.Error().
-	// 			Err(err).
-	// 			Msg("Could not parse inflation min")
-	// 	} else {
-	// 		paramsInflationMaxGauge.Set(value)
-	// 	}
+		if value, err := strconv.ParseFloat(apy.String(), 64); err != nil {
+			sublogger.Error().
+				Err(err).
+				Msg("Could not parse apy")
+		} else {
+			paramsAPYGauge.Set(value)
+		}
 
-	// 	if value, err := strconv.ParseFloat(paramsResponse.Params.InflationRateChange.String(), 64); err != nil {
-	// 		sublogger.Error().
-	// 			Err(err).
-	// 			Msg("Could not parse inflation rate change")
-	// 	} else {
-	// 		paramsInflationRateChangeGauge.Set(value)
-	// 	}
-	// }()
-	// wg.Add(1)
+		bankClient := banktypes.NewQueryClient(grpcConn)
+		bankResponse, err := bankClient.TotalSupply(
+			context.Background(),
+			&banktypes.QueryTotalSupplyRequest{},
+		)
+		if err != nil {
+			sublogger.Error().Err(err).Msg("Could not get bank total supply")
+			return
+		}
+
+		for _, coin := range bankResponse.Supply {
+			if supply, err := strconv.ParseInt(coin.Amount.String(), 10, 64); err != nil {
+				sublogger.Error().
+					Err(err).
+					Msg("Could not get total supply")
+			} else {
+				inflation := epoch_provision.Mul(sdk.NewDecFromBigInt(big.NewInt(reduction_period_in_epochs))).Quo(sdk.NewDecFromBigInt(big.NewInt(supply)))
+				if inflationRate, err := strconv.ParseFloat(inflation.String(), 64); err != nil {
+					sublogger.Error().
+						Err(err).
+						Msg("Could not parse apy")
+				} else {
+					paramsInflationGauge.Set(inflationRate)
+				}
+			}
+		}
+	}()
+	wg.Add(1)
 
 	go func() {
 		defer wg.Done()
@@ -397,9 +428,16 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 					Err(err).
 					Msg("Could not parse staked amount")
 			} else {
+				var stakedAmount float64
+				if hostZone.ChainId == "evmos_9001-2" {
+					stakedAmount = float64(value / math.Pow10(18))
+				} else {
+					stakedAmount = float64(value / math.Pow10(6))
+				}
+
 				paramsStakedAmountGauge.With(prometheus.Labels{
 					"chain": hostZone.ChainId,
-				}).Set(value)
+				}).Set(stakedAmount)
 			}
 		}
 

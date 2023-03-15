@@ -7,6 +7,7 @@ replace github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alp
 replace google.golang.org/grpc => google.golang.org/grpc v1.50.1
 
 require (
+	cosmossdk.io/math v1.0.0-beta.3 // indirect
 	github.com/Stride-Labs/stride/v6 v6.0.0
 	github.com/cosmos/cosmos-sdk v0.46.7
 	github.com/google/uuid v1.3.0
